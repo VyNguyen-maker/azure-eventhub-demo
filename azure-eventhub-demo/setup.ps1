@@ -1,113 +1,78 @@
 Clear-Host
-write-host "Starting script at $(Get-Date)"
+Write-Host "Starting script at $(Get-Date)"
 
+# Đảm bảo PSGallery là trusted
 Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 
-# Handle cases where the user has multiple subscriptions
+# --- Chọn subscription nếu có nhiều hơn 1 ---
 $subs = Get-AzSubscription | Select-Object
-if($subs.GetType().IsArray -and $subs.length -gt 1){
-        Write-Host "You have multiple Azure subscriptions - please select the one you want to use:"
-        for($i = 0; $i -lt $subs.length; $i++)
-        {
-                Write-Host "[$($i)]: $($subs[$i].Name) (ID = $($subs[$i].Id))"
-        }
-        $selectedIndex = -1
-        $selectedValidIndex = 0
-        while ($selectedValidIndex -ne 1)
-        {
-                $enteredValue = Read-Host("Enter 0 to $($subs.Length - 1)")
-                if (-not ([string]::IsNullOrEmpty($enteredValue)))
-                {
-                    if ([int]$enteredValue -in (0..$($subs.Length - 1)))
-                    {
-                        $selectedIndex = [int]$enteredValue
-                        $selectedValidIndex = 1
-                    }
-                    else
-                    {
-                        Write-Output "Please enter a valid subscription number."
-                    }
-                }
-                else
-                {
-                    Write-Output "Please enter a valid subscription number."
-                }
-        }
-        $selectedSub = $subs[$selectedIndex].Id
-        Select-AzSubscription -SubscriptionId $selectedSub
-        az account set --subscription $selectedSub
+if ($subs.Count -gt 1) {
+    Write-Host "You have multiple Azure subscriptions - please select the one to use:"
+    for ($i = 0; $i -lt $subs.Count; $i++) {
+        Write-Host "[$i]: $($subs[$i].Name) (ID = $($subs[$i].Id))"
+    }
+
+    do {
+        $input = Read-Host "Enter a number (0 to $($subs.Count - 1))"
+    } while (-not ([int]::TryParse($input, [ref]$selectedIndex) -and $selectedIndex -ge 0 -and $selectedIndex -lt $subs.Count))
+
+    $selectedSub = $subs[$selectedIndex].Id
+    Select-AzSubscription -SubscriptionId $selectedSub
+    az account set --subscription $selectedSub
+} elseif ($subs.Count -eq 1) {
+    $selectedSub = $subs[0].Id
+    Select-AzSubscription -SubscriptionId $selectedSub
+    az account set --subscription $selectedSub
 }
 
-# Register resource providers
-Write-Host "Registering resource providers...";
-$provider_list = "Microsoft.EventHub", "Microsoft.StreamAnalytics"
-foreach ($provider in $provider_list){
-    $result = Register-AzResourceProvider -ProviderNamespace $provider
-    $status = $result.RegistrationState
-    Write-Host "$provider : $status"
+# --- Đăng ký provider cần thiết ---
+$providers = "Microsoft.EventHub", "Microsoft.StreamAnalytics"
+foreach ($p in $providers) {
+    $result = Register-AzResourceProvider -ProviderNamespace $p
+    Write-Host "$p : $($result.RegistrationState)"
 }
 
-# Generate unique random suffix
-[string]$suffix =  -join ((48..57) + (97..122) | Get-Random -Count 7 | % {[char]$_})
-Write-Host "Your randomly-generated suffix for Azure resources is $suffix"
+# --- Tạo suffix ngẫu nhiên cho tên resource ---
+[string]$suffix = -join ((48..57) + (97..122) | Get-Random -Count 7 | % {[char]$_})
+Write-Host "Generated unique suffix: $suffix"
 $resourceGroupName = "project-is402-$suffix"
 
-# Lấy danh sách region hỗ trợ EventHub & StreamAnalytics
-$locations = Get-AzLocation | Where-Object {
-    $_.Providers -contains "Microsoft.EventHub" -and
-    $_.Providers -contains "Microsoft.StreamAnalytics"
-}
-
-# Hiển thị danh sách với số index
+# --- Lấy danh sách region và cho chọn ---
+$locations = Get-AzLocation | Where-Object { $_.Providers -contains "Microsoft.EventHub" -and $_.Providers -contains "Microsoft.StreamAnalytics" }
 Write-Host "Available Azure regions:"
-for ($i = 0; $i -lt $locations.Count; $i++) {
-    Write-Host "[$i] $($locations[$i].Location)"
-}
+for ($i = 0; $i -lt $locations.Count; $i++) { Write-Host "[$i] $($locations[$i].Location)" }
 
-# Chọn region
-$selectedIndex = -1
-while ($selectedIndex -lt 0 -or $selectedIndex -ge $locations.Count) {
-    $input = Read-Host "Enter the number corresponding to the region you want to use"
-    if ([int]::TryParse($input, [ref]$selectedIndex)) {
-        if ($selectedIndex -lt 0 -or $selectedIndex -ge $locations.Count) {
-            Write-Host "Invalid selection, try again."
-        }
-    } else {
-        Write-Host "Please enter a valid number."
-        $selectedIndex = -1
-    }
-}
+do {
+    $input = Read-Host "Enter the number corresponding to the region you want"
+} while (-not ([int]::TryParse($input, [ref]$selectedIndex) -and $selectedIndex -ge 0 -and $selectedIndex -lt $locations.Count))
 
 $Region = $locations[$selectedIndex].Location
-Write-Host "You selected region: $Region"
+Write-Host "Selected region: $Region"
 
-# Tạo resource group
-Write-Host "Creating $resourceGroupName resource group in $Region ..."
+# --- Tạo resource group ---
+Write-Host "Creating resource group $resourceGroupName in $Region ..."
 New-AzResourceGroup -Name $resourceGroupName -Location $Region | Out-Null
 
-# Create Azure resources
+# --- Tạo Event Hub ---
 $eventNsName = "events$suffix"
 $eventHubName = "eventhub$suffix"
-
-write-host "Creating Azure resources in $resourceGroupName resource group..."
-write-host "(This may take some time!)"
+Write-Host "Deploying Event Hub namespace: $eventNsName, Event Hub: $eventHubName ..."
 New-AzResourceGroupDeployment -ResourceGroupName $resourceGroupName `
-  -TemplateFile "setup.json" `
-  -Mode Complete `
-  -uniqueSuffix $suffix `
-  -eventNsName $eventNsName `
-  -eventHubName $eventHubName `
-  -Force
+    -TemplateFile "setup.json" `
+    -Mode Complete `
+    -uniqueSuffix $suffix `
+    -eventNsName $eventNsName `
+    -eventHubName $eventHubName `
+    -Force
 
-# Prepare JavaScript EventHub client app
-write-host "Creating Event Hub client app..."
+# --- Tạo JavaScript client ---
+Write-Host "Preparing Event Hub client JS app ..."
 npm install @azure/event-hubs@5.9.0 -s
 Update-AzConfig -DisplayBreakingChangeWarning $false | Out-Null
 $conStrings = Get-AzEventHubKey -ResourceGroupName $resourceGroupName -NamespaceName $eventNsName -AuthorizationRuleName "RootManageSharedAccessKey"
 $conString = $conStrings.PrimaryConnectionString
-$javascript = Get-Content -Path "setup.txt" -Raw
-$javascript = $javascript.Replace("EVENTHUBCONNECTIONSTRING", $conString)
-$javascript = $javascript.Replace("EVENTHUBNAME",$eventHubName)
-Set-Content -Path "orderclient.js" -Value $javascript
+$jsTemplate = Get-Content -Path "setup.txt" -Raw
+$jsTemplate = $jsTemplate.Replace("EVENTHUBCONNECTIONSTRING", $conString).Replace("EVENTHUBNAME",$eventHubName)
+Set-Content -Path "orderclient.js" -Value $jsTemplate
 
-write-host "Script completed at $(Get-Date)"
+Write-Host "Script completed at $(Get-Date)"
