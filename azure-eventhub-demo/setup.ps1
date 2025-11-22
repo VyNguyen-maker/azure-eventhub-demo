@@ -52,9 +52,36 @@ foreach ($provider in $provider_list){
 Write-Host "Your randomly-generated suffix for Azure resources is $suffix"
 $resourceGroupName = "project-is402-$suffix"
 
-# Choose a region
-$Region = "Southeast Asia"
+# Lấy danh sách region hỗ trợ EventHub & StreamAnalytics
+$locations = Get-AzLocation | Where-Object {
+    $_.Providers -contains "Microsoft.EventHub" -and
+    $_.Providers -contains "Microsoft.StreamAnalytics"
+}
 
+# Hiển thị danh sách với số index
+Write-Host "Available Azure regions:"
+for ($i = 0; $i -lt $locations.Count; $i++) {
+    Write-Host "[$i] $($locations[$i].Location)"
+}
+
+# Chọn region
+$selectedIndex = -1
+while ($selectedIndex -lt 0 -or $selectedIndex -ge $locations.Count) {
+    $input = Read-Host "Enter the number corresponding to the region you want to use"
+    if ([int]::TryParse($input, [ref]$selectedIndex)) {
+        if ($selectedIndex -lt 0 -or $selectedIndex -ge $locations.Count) {
+            Write-Host "Invalid selection, try again."
+        }
+    } else {
+        Write-Host "Please enter a valid number."
+        $selectedIndex = -1
+    }
+}
+
+$Region = $locations[$selectedIndex].Location
+Write-Host "You selected region: $Region"
+
+# Tạo resource group
 Write-Host "Creating $resourceGroupName resource group in $Region ..."
 New-AzResourceGroup -Name $resourceGroupName -Location $Region | Out-Null
 
