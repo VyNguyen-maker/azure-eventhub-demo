@@ -52,22 +52,10 @@ foreach ($provider in $provider_list){
 Write-Host "Your randomly-generated suffix for Azure resources is $suffix"
 $resourceGroupName = "project-is402-$suffix"
 
-# Choose a random region
-$locations = Get-AzLocation | Where-Object {
-    $_.Providers -contains "Microsoft.EventHub" -and
-    $_.Providers -contains "Microsoft.StreamAnalytics"
-}
-$max_index = $locations.Count - 1
-# Start with preferred region if specified, otherwise choose one at random
-if ($args.count -gt 0 -And $args[0] -in $locations.Location)
-{
-    $Region = $args[0]
-}
-else {
-    $rand = (0..$max_index) | Get-Random
-    $Region = $locations.Get($rand).Location
-}
+$Region = "East US"
+Write-Host "Using region: $Region"
 
+# Tạo resource group
 Write-Host "Creating $resourceGroupName resource group in $Region ..."
 New-AzResourceGroup -Name $resourceGroupName -Location $Region | Out-Null
 
