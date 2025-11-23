@@ -52,10 +52,11 @@ foreach ($provider in $provider_list){
 Write-Host "Your randomly-generated suffix for Azure resources is $suffix"
 $resourceGroupName = "project-is402-$suffix"
 
-$Region = "eastus"
+# CHANGE REGION HERE
+$Region = "eastasia"
 Write-Host "Using region: $Region"
 
-# Tạo resource group
+# Create resource group
 Write-Host "Creating $resourceGroupName resource group in $Region ..."
 New-AzResourceGroup -Name $resourceGroupName -Location $Region | Out-Null
 
