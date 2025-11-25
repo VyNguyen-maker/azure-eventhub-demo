@@ -39,7 +39,7 @@ if($subs.GetType().IsArray -and $subs.length -gt 1){
 }
 
 # Register resource providers
-Write-Host "Registering resource providers...";
+Write-Host "Registering resource providers..."
 $provider_list = "Microsoft.EventHub", "Microsoft.StreamAnalytics"
 foreach ($provider in $provider_list){
     $result = Register-AzResourceProvider -ProviderNamespace $provider
@@ -50,21 +50,28 @@ foreach ($provider in $provider_list){
 # Generate unique random suffix
 [string]$suffix =  -join ((48..57) + (97..122) | Get-Random -Count 7 | % {[char]$_})
 Write-Host "Your randomly-generated suffix for Azure resources is $suffix"
-$resourceGroupName = "project-is402-$suffix"
 
-# CHANGE REGION HERE
+$resourceGroupName = "project-is402-glj5zyp"
+
+# CHECK IF RG EXISTS
+$rg = Get-AzResourceGroup -Name $resourceGroupName -ErrorAction SilentlyContinue
+if (-not $rg) {
+    Write-Host "ERROR: Resource group '$resourceGroupName' does not exist!" -ForegroundColor Red
+    exit
+}
+Write-Host "Using existing Resource Group: $resourceGroupName" -ForegroundColor Green
+
+# -------------------------------
+
+# Region (should match your RG or template)
 $Region = "eastasia"
 Write-Host "Using region: $Region"
 
-# Create resource group
-Write-Host "Creating $resourceGroupName resource group in $Region ..."
-New-AzResourceGroup -Name $resourceGroupName -Location $Region | Out-Null
-
-# Create Azure resources
+# Variables for Event Hub
 $eventNsName = "events$suffix"
 $eventHubName = "eventhub$suffix"
 
-write-host "Creating Azure resources in $resourceGroupName resource group..."
+write-host "Creating Azure resources in existing resource group $resourceGroupName..."
 write-host "(This may take some time!)"
 New-AzResourceGroupDeployment -ResourceGroupName $resourceGroupName `
   -TemplateFile "setup.json" `
@@ -80,6 +87,7 @@ npm install @azure/event-hubs@5.9.0 -s
 Update-AzConfig -DisplayBreakingChangeWarning $false | Out-Null
 $conStrings = Get-AzEventHubKey -ResourceGroupName $resourceGroupName -NamespaceName $eventNsName -AuthorizationRuleName "RootManageSharedAccessKey"
 $conString = $conStrings.PrimaryConnectionString
+
 $javascript = Get-Content -Path "setup.txt" -Raw
 $javascript = $javascript.Replace("EVENTHUBCONNECTIONSTRING", $conString)
 $javascript = $javascript.Replace("EVENTHUBNAME",$eventHubName)
