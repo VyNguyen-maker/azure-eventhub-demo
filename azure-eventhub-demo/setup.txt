@@ -1,26 +1,23 @@
-// send_demo_orders_debug.js
 const { EventHubProducerClient } = require("@azure/event-hubs");
 
-// ==== ==== ====  IMPORTANT: replace these with your real values ==== ==== ====
-const connectionString = "EVENTHUBCONNECTIONSTRING"; // e.g. "Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=...;SharedAccessKey=..."
-// If your connection string already includes EntityPath=<yourEventHubName>, set eventHubName to null
-const eventHubName = "EVENTHUBNAME"; // e.g. "myeventhub"
-// ==== ==== ====  end config  ==== ==== ====
+const connectionString = "EVENTHUBCONNECTIONSTRING";
+const eventHubName = "EVENTHUBNAME";
 
+// ---------------- Helper functions ----------------
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
-function sample(arr) { return arr[randInt(0, arr.length - 1)]; }
-function uuidv4() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-  const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-  return v.toString(16);
-});}
-function randomTimestampWithinDays(days) {
-  const now = Date.now();
-  const past = now - randInt(0, days * 24 * 60 * 60 * 1000);
-  return new Date(past).toISOString();
+function sample(arr) {
+  return arr[randInt(0, arr.length - 1)];
+}
+function uuidv4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }
 
+// Data catalogs
 const categories = ["Electronics", "Home", "Beauty", "Fashion", "Toys", "Grocery"];
 const suppliers = [
   { supplierId: "SUP-1", name: "Alpha Supplies" },
@@ -40,6 +37,7 @@ const cities = [
 ];
 const paymentMethods = ["CreditCard", "COD", "E-Wallet", "BankTransfer"];
 
+// Build product catalog
 const products = [];
 for (let i = 1; i <= 20; i++) {
   const sup = sample(suppliers);
@@ -52,167 +50,118 @@ for (let i = 1; i <= 20; i++) {
   });
 }
 
+// Simulate users
 const users = [];
 for (let u = 1; u <= 120; u++) {
   users.push({
     userId: `U-${u}`,
-    createdAt: randomTimestampWithinDays(365),
+    createdAt: new Date(Date.now() - randInt(0, 365*24*3600*1000)).toISOString(),
     segment: (u % 10 === 0) ? "VIP" : ((u % 3 === 0) ? "Frequent" : "Normal")
   });
 }
 
-async function run() {
-  // Basic validation
-  if (!connectionString || connectionString.includes("EVENTHUBCONNECTIONSTRING")) {
-    console.error("ERROR: Please set a valid connectionString at the top of the script.");
-    process.exit(1);
-  }
-  if (!eventHubName || eventHubName.includes("EVENTHUBNAME")) {
-    console.warn("WARNING: eventHubName looks unset or placeholder. If your connection string already includes EntityPath, set eventHubName = null. Otherwise put your Event Hub name.");
-    // we don't exit — user may be using connection string with EntityPath
-  }
+// ---------------- Main ----------------
+async function main() {
+  const producer = new EventHubProducerClient(connectionString, eventHubName);
 
-  // Create client
-  let producer;
-  try {
-producer = new EventHubProducerClient(connectionString, eventHubName);
-    console.log("Producer client created. Event Hub name param:", eventHubName ? eventHubName : "(null - using EntityPath in connection string)");
-  } catch (err) {
-    console.error("Failed to create EventHubProducerClient:", err && err.message ? err.message : err);
-    process.exit(1);
-  }
+  console.log("Realtime order generator started...");
 
-  // 1 Send one test event to verify connectivity & permission
-  const testEvent = { body: { test: true, ts: new Date().toISOString(), msg: "connectivity-test" } };
-  try {
-    // create small batch
-    const batch = await producer.createBatch();
-    if (!batch.tryAdd(testEvent)) {
-      // fallback send single event array
-      await producer.sendBatch([ testEvent ]);
-    } else {
-      await producer.sendBatch(batch);
-    }
-    console.log("Test event sent successfully. If this fails with auth error, check connection string and SAS policy rights (Send).");
-  } catch (err) {
-    console.error("ERROR sending test event. Details:");
-    console.error(err);
-    await producer.close().catch(()=>{});
-    process.exit(1);
-  }
+  setInterval(async () => {
+    // Số order mỗi lần gửi: 1-2
+    const numOrders = randInt(1,2);
 
-  // 2 Main loop sending demo orders
-  const NUM_ORDERS = 500;
-  for (let i = 0; i < NUM_ORDERS; i++) {
-    const orderId = uuidv4();
-    const customer = sample(users);
-    const numItems = randInt(1, 4);
-    const items = [];
-    let orderSubtotal = 0;
-    for (let j = 0; j < numItems; j++) {
-      const prod = sample(products);
-      const qty = randInt(1,3);
-      const itemTotal = +(qty * prod.price).toFixed(2);
-      orderSubtotal += itemTotal;
-      items.push({
-        productId: prod.productId,
-        name: prod.name,
-        category: prod.category,
-        supplierId: prod.supplierId,
-        unitPrice: prod.price,
-        quantity: qty,
-        total: itemTotal
-      });
-    }
+    for (let i = 0; i < numOrders; i++) {
+      const orderId = uuidv4();
+      const customer = sample(users);
+      const numItems = randInt(1, 4);
+      const items = [];
+      let orderSubtotal = 0;
 
-    const discount = (Math.random() < 0.15) ? +(orderSubtotal * 0.05).toFixed(2) : 0;
-    const shippingFee = +(((orderSubtotal > 1000) ? 0 : randInt(15,50)).toFixed(2));
-    const tax = +(orderSubtotal * 0.08).toFixed(2);
-    const grandTotal = +(orderSubtotal - discount + shippingFee + tax).toFixed(2);
+      for (let j = 0; j < numItems; j++) {
+        const prod = sample(products);
+        const qty = randInt(1,3);
+        const itemTotal = +(qty * prod.price).toFixed(2);
+        orderSubtotal += itemTotal;
+        items.push({
+          productId: prod.productId,
+          name: prod.name,
+          category: prod.category,
+          supplierId: prod.supplierId,
+          unitPrice: prod.price,
+          quantity: qty,
+          total: itemTotal
+        });
+      }
 
-    const createdAt = randomTimestampWithinDays(90);
-    const processingHours = randInt(1,48);
-    const shippedDelayHours = randInt(1,24);
-    const shippingHours = randInt(6,168);
-    const processedAt = new Date(new Date(createdAt).getTime() + processingHours * 3600 * 1000).toISOString();
-    const shippedAt = new Date(new Date(processedAt).getTime() + shippedDelayHours * 3600 * 1000).toISOString();
-    const deliveredAt = new Date(new Date(shippedAt).getTime() + shippingHours * 3600 * 1000).toISOString();
+      const discount = (Math.random() < 0.15) ? +(orderSubtotal * 0.05).toFixed(2) : 0;
+      const shippingFee = +((orderSubtotal>1000)?0:randInt(15,50)).toFixed(2);
+      const tax = +(orderSubtotal*0.08).toFixed(2);
+      const grandTotal = +(orderSubtotal - discount + shippingFee + tax).toFixed(2);
 
-    let orderStatus = "delivered";
-    const r = Math.random();
-    if (r < 0.03) orderStatus = "cancelled";
-    else if (r < 0.07) orderStatus = "returned";
-    else if (r < 0.20) orderStatus = "shipped";
+      const createdAt = new Date().toISOString();
+      const processedAt = new Date(new Date(createdAt).getTime() + randInt(1,48)*3600*1000).toISOString();
+      const shippedAt = new Date(new Date(processedAt).getTime() + randInt(1,24)*3600*1000).toISOString();
+      const deliveredAt = new Date(new Date(shippedAt).getTime() + randInt(6,168)*3600*1000).toISOString();
 
-    let returnReason = null;
-    if (orderStatus === "returned") returnReason = sample(["Damaged", "Wrong item", "Changed mind", "Quality"]);
+      let orderStatus = "delivered";
+      const r = Math.random();
+      if(r<0.03) orderStatus="cancelled";
+      else if(r<0.07) orderStatus="returned";
+      else if(r<0.20) orderStatus="shipped";
 
-    let review = null;
-if (orderStatus === "delivered" && Math.random() < 0.25) {
-      const rating = randInt(1,5);
-      review = { rating, reviewText: rating <= 2 ? "Not satisfied" : "Good product", reviewAt: new Date(new Date(deliveredAt).getTime() + randInt(1,72)*3600*1000).toISOString() };
-    }
+      let returnReason = (orderStatus==="returned") ? sample(["Damaged","Wrong item","Customer changed mind","Quality not as expected"]) : null;
+      let review = null;
+      if(orderStatus==="delivered" && Math.random()<0.25){
+        const rating = randInt(1,5);
+        review = {
+          rating,
+          reviewText: (rating<=2)?"Not satisfied with product quality":"Good product, happy with purchase",
+          reviewLength: (rating<=2)?randInt(10,60):randInt(20,200),
+          reviewAt: new Date(new Date(deliveredAt).getTime()+randInt(1,72)*3600*1000).toISOString()
+        };
+      }
 
-    const geo = sample(cities);
-    const channel = sample(channels);
-    const paymentMethod = sample(paymentMethods);
-    const shippingProvider = sample(shippingProviders);
-    const warehouse = sample(warehouses);
+      const geo = sample(cities);
+      const channel = sample(channels);
+      const paymentMethod = sample(paymentMethods);
+      const shippingProvider = sample(shippingProviders);
+      const warehouse = sample(warehouses);
 
-    const orderEvent = {
-      eventType: "order_created",
-      orderId,
-      customer: { userId: customer.userId, segment: customer.segment, signupAt: customer.createdAt },
-      createdAt,
-      processedAt,
-      shippedAt,
-      deliveredAt,
-      orderStatus,
-      items,
-      orderSubtotal: +orderSubtotal.toFixed(2),
-      discount,
-      shippingFee,
-      tax,
-      grandTotal,
-      paymentMethod,
-      channel,
-      shippingProvider,
-      warehouse,
-      returnReason,
-      geo,
-      review,
-      meta: { source: "demo-generator", sequence: i+1 }
-    };
+      const orderEvent = {
+        eventType: "order_created",
+        orderId,
+        customer: { userId: customer.userId, segment: customer.segment, signupAt: customer.createdAt },
+        createdAt,
+        processedAt,
+        shippedAt,
+        deliveredAt,
+        orderStatus,
+        items,
+        orderSubtotal: +orderSubtotal.toFixed(2),
+        discount,
+        shippingFee,
+        tax,
+        grandTotal,
+        paymentMethod,
+        channel,
+        shippingProvider,
+        warehouse,
+        returnReason,
+        geo,
+        review,
+        meta: { source:"demo-generator" }
+      };
 
-    try {
-      const batch = await producer.createBatch();
-      const eventEnvelope = { body: orderEvent };
-      if (!batch.tryAdd(eventEnvelope)) {
-        // If the event is too large to fit into a single empty batch (very unlikely here), send as single-element array
-        await producer.sendBatch([ eventEnvelope ]);
-      } else {
+      try {
+        const batch = await producer.createBatch();
+        batch.tryAdd({ body: orderEvent });
         await producer.sendBatch(batch);
+        console.log(`Sent order: ${orderId} - ${orderStatus} - ${grandTotal}`);
+      } catch(err){
+        console.error("Send error:", err);
       }
-
-      // verbose progress logging
-      if ((i+1) % 50 === 0 || i < 5) {
-        console.log(`Sent ${i+1}/${NUM_ORDERS} orders. lastOrderId=${orderId} status=${orderStatus} amount=${grandTotal}`);
-      }
-    } catch (err) {
-      console.error(`Send error at order ${i+1}. Error:`, err);
-      // do not exit immediately — try to continue sending remaining events, but record error
     }
-  } // end for
-
-  try {
-    await producer.close();
-    console.log("Producer closed. All done.");
-  } catch (err) {
-    console.error("Error closing producer:", err);
-  }
+  }, 2000); // gửi mỗi 2 giây
 }
 
-run().catch(err => {
-  console.error("Fatal error in run():", err);
-  process.exit(1);
-});
+main().catch(err => console.error("Fatal error:", err));
