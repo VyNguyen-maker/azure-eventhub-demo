@@ -109,7 +109,7 @@ productId: prod.productId,
     const grandTotal = +(orderSubtotal - discount + shippingFee + tax).toFixed(2);
 
     // Processing & shipping times (ms) realistic ranges (in hours -> convert to ISO times)
-    const createdAt = randomTimestampWithinDays(90);
+    const createdAt = new Date().toISOString();
     const processingHours = randInt(1, 48); // 1 to 48 hours
     const shippingHours = randInt(6, 168); // 6 hours to 7 days
     const processedAt = new Date(new Date(createdAt).getTime() + processingHours * 3600 * 1000).toISOString();
