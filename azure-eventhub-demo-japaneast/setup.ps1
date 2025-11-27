@@ -53,7 +53,7 @@ Write-Host "Your randomly-generated suffix for Azure resources is $suffix"
 $resourceGroupName = "project-is402-$suffix"
 
 # CHANGE REGION HERE
-$Region = "japanwest"
+$Region = "japaneast"
 Write-Host "Using region: $Region"
 
 # Create resource group
