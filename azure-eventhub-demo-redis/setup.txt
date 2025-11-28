@@ -1,0 +1,167 @@
+const { EventHubProducerClient } = require("@azure/event-hubs");
+
+const connectionString = "EVENTHUBCONNECTIONSTRING";
+const eventHubName = "EVENTHUBNAME";
+
+// ---------------- Helper functions ----------------
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+function sample(arr) {
+  return arr[randInt(0, arr.length - 1)];
+}
+function uuidv4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+// Data catalogs
+const categories = ["Electronics", "Home", "Beauty", "Fashion", "Toys", "Grocery"];
+const suppliers = [
+  { supplierId: "SUP-1", name: "Alpha Supplies" },
+  { supplierId: "SUP-2", name: "Beta Trading" },
+  { supplierId: "SUP-3", name: "Gamma Goods" },
+  { supplierId: "SUP-4", name: "Delta Wholesale" }
+];
+const shippingProviders = ["FastShip", "GoDeliver", "LocalPost", "ExpressNow"];
+const warehouses = ["WH-1", "WH-2", "WH-3"];
+const channels = ["app", "web", "social", "affiliate"];
+const cities = [
+  { city: "Hanoi", region: "North" },
+  { city: "Ho Chi Minh", region: "South" },
+  { city: "Da Nang", region: "Central" },
+  { city: "Hai Phong", region: "North" },
+  { city: "Can Tho", region: "South" }
+];
+const paymentMethods = ["CreditCard", "COD", "E-Wallet", "BankTransfer"];
+
+// Build product catalog
+const products = [];
+for (let i = 1; i <= 20; i++) {
+  const sup = sample(suppliers);
+  products.push({
+    productId: `P-${i}`,
+    name: `Product ${i}`,
+    category: sample(categories),
+    supplierId: sup.supplierId,
+    price: +(randInt(50, 2000) + Math.random()).toFixed(2)
+  });
+}
+
+// Simulate users
+const users = [];
+for (let u = 1; u <= 120; u++) {
+  users.push({
+    userId: `U-${u}`,
+    createdAt: new Date(Date.now() - randInt(0, 365*24*3600*1000)).toISOString(),
+    segment: (u % 10 === 0) ? "VIP" : ((u % 3 === 0) ? "Frequent" : "Normal")
+  });
+}
+
+// ---------------- Main ----------------
+async function main() {
+  const producer = new EventHubProducerClient(connectionString, eventHubName);
+
+  console.log("Realtime order generator started...");
+
+  setInterval(async () => {
+    // Số order mỗi lần gửi: 1-2
+    const numOrders = randInt(1,2);
+
+    for (let i = 0; i < numOrders; i++) {
+      const orderId = uuidv4();
+      const customer = sample(users);
+      const numItems = randInt(1, 4);
+      const items = [];
+      let orderSubtotal = 0;
+
+      for (let j = 0; j < numItems; j++) {
+        const prod = sample(products);
+        const qty = randInt(1,3);
+        const itemTotal = +(qty * prod.price).toFixed(2);
+        orderSubtotal += itemTotal;
+        items.push({
+          productId: prod.productId,
+          name: prod.name,
+          category: prod.category,
+          supplierId: prod.supplierId,
+          unitPrice: prod.price,
+          quantity: qty,
+          total: itemTotal
+        });
+      }
+
+      const discount = (Math.random() < 0.15) ? +(orderSubtotal * 0.05).toFixed(2) : 0;
+      const shippingFee = +((orderSubtotal>1000)?0:randInt(15,50)).toFixed(2);
+      const tax = +(orderSubtotal*0.08).toFixed(2);
+      const grandTotal = +(orderSubtotal - discount + shippingFee + tax).toFixed(2);
+
+      const createdAt = new Date().toISOString();
+      const processedAt = new Date(new Date(createdAt).getTime() + randInt(1,48)*3600*1000).toISOString();
+      const shippedAt = new Date(new Date(processedAt).getTime() + randInt(1,24)*3600*1000).toISOString();
+      const deliveredAt = new Date(new Date(shippedAt).getTime() + randInt(6,168)*3600*1000).toISOString();
+
+      let orderStatus = "delivered";
+      const r = Math.random();
+      if(r<0.03) orderStatus="cancelled";
+      else if(r<0.07) orderStatus="returned";
+      else if(r<0.20) orderStatus="shipped";
+
+      let returnReason = (orderStatus==="returned") ? sample(["Damaged","Wrong item","Customer changed mind","Quality not as expected"]) : null;
+      let review = null;
+      if(orderStatus==="delivered" && Math.random()<0.25){
+        const rating = randInt(1,5);
+        review = {
+          rating,
+          reviewText: (rating<=2)?"Not satisfied with product quality":"Good product, happy with purchase",
+          reviewLength: (rating<=2)?randInt(10,60):randInt(20,200),
+          reviewAt: new Date(new Date(deliveredAt).getTime()+randInt(1,72)*3600*1000).toISOString()
+        };
+      }
+
+      const geo = sample(cities);
+      const channel = sample(channels);
+      const paymentMethod = sample(paymentMethods);
+      const shippingProvider = sample(shippingProviders);
+      const warehouse = sample(warehouses);
+
+      const orderEvent = {
+        eventType: "order_created",
+        orderId,
+        customer: { userId: customer.userId, segment: customer.segment, signupAt: customer.createdAt },
+        createdAt,
+        processedAt,
+        shippedAt,
+        deliveredAt,
+        orderStatus,
+        items,
+        orderSubtotal: +orderSubtotal.toFixed(2),
+        discount,
+        shippingFee,
+        tax,
+        grandTotal,
+        paymentMethod,
+        channel,
+        shippingProvider,
+        warehouse,
+        returnReason,
+        geo,
+        review,
+        meta: { source:"demo-generator" }
+      };
+
+      try {
+        const batch = await producer.createBatch();
+        batch.tryAdd({ body: orderEvent });
+        await producer.sendBatch(batch);
+        console.log(`Sent order: ${orderId} - ${orderStatus} - ${grandTotal}`);
+      } catch(err){
+        console.error("Send error:", err);
+      }
+    }
+  }, 2000); // gửi mỗi 2 giây
+}
+
+main().catch(err => console.error("Fatal error:", err));
